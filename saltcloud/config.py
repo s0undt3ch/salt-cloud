@@ -2,11 +2,15 @@
 Manage configuration files in salt-cloud
 '''
 
+# Import python libs
+import urlparse
+
 # Import salt libs
 import salt.config
 
 
 CLOUD_CONFIG_DEFAULTS = {
+    'root_dir': '/',
     'verify_env': True,
     'default_include': 'cloud.d/*.conf',
     # Provider defaults
@@ -69,6 +73,17 @@ def apply_cloud_config(overrides, defaults=None):
     # Migrate old configuration
     opts = old_to_new(opts)
     opts = prov_dict(opts)
+
+    # Prepend root_dir to other paths
+    prepend_root_dirs = []
+    log_setting = opts.get('log_file', '')
+    if log_setting is not None:
+        if urlparse.urlparse(log_setting).scheme == '':
+            # These can be set to syslog, so, not actual paths on the system,
+            # but, if we reached here, it's definitely a path.
+            prepend_root_dirs.append('log_file')
+
+    salt.config.prepend_root_dir(opts, prepend_root_dirs)
 
     return opts
 
