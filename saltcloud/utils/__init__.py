@@ -585,7 +585,11 @@ def root_cmd(command, tty, sudo, **kwargs):
         proc = subprocess.Popen(cmd, shell=True,
                                 stderr=subprocess.PIPE,
                                 stdout=subprocess.PIPE)
-        proc.communicate()
+        out, err = proc.communicate()
+        if out and out.strip():
+            log.info('{0!r} STDOUT:\n{1}'.format(command, out))
+        if err and err.strip():
+            log.info('{0!r} STDERR:\n{1}'.format(command, err))
         return proc.returncode
 
 
