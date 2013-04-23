@@ -339,7 +339,8 @@ def deploy_script(host, port=22, timeout=900, username='root',
                   master_pub=None, master_pem=None, master_conf=None,
                   minion_pub=None, minion_pem=None, minion_conf=None,
                   keep_tmp=False, script_args=None, ssh_timeout=15,
-                  display_ssh_output=True, make_syndic=False):
+                  display_ssh_output=True, stream_ssh_output=False,
+                  make_syndic=False):
     '''
     Copy a deploy script to a remote server, execute it, and remove it
     '''
@@ -361,6 +362,7 @@ def deploy_script(host, port=22, timeout=900, username='root',
                       'port': port,
                       'username': username,
                       'timeout': ssh_timeout,
+                      'stream_ssh_output': stream_ssh_output,
                       'display_ssh_output': display_ssh_output}
             if key_filename:
                 log.debug('Using {0} as the key_filename'.format(key_filename))
@@ -426,7 +428,6 @@ def deploy_script(host, port=22, timeout=900, username='root',
 
             # Run the deploy script
             if script:
-                log.debug('Executing /tmp/deploy.sh')
                 if 'bootstrap-salt' in script:
                     deploy_command += ' -c /tmp/'  # FIXME: always?
                     if make_syndic:
@@ -436,6 +437,7 @@ def deploy_script(host, port=22, timeout=900, username='root',
                 if script_args:
                     deploy_command += ' {0}'.format(script_args)
 
+                log.debug('Executing /tmp/deploy.sh')
                 root_cmd(deploy_command, tty, sudo, **kwargs)
                 log.debug('Executed command {0}'.format(deploy_command))
 
@@ -445,7 +447,7 @@ def deploy_script(host, port=22, timeout=900, username='root',
                     log.debug('Removed /tmp/deploy.sh')
 
             if keep_tmp:
-                log.debug('Not removing deloyment files from /tmp/')
+                log.debug('Not removing deployment files from /tmp/')
 
             # Remove minion configuration
             if not keep_tmp:
@@ -567,8 +569,18 @@ def root_cmd(command, tty, sudo, **kwargs):
 
     log.debug('Executing command: {0}'.format(command))
 
-    if 'display_ssh_output' in kwargs and kwargs['display_ssh_output']:
+    if kwargs.get('display_ssh_output', True) is True:
         return subprocess.call(cmd, shell=True)
+    elif kwargs.get('stream_ssh_output', True) is True:
+        from saltcloud.utils.nb_popen import NonBlockingPopen
+        proc = NonBlockingPopen(
+            cmd,
+            shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stream_stds=True,
+        )
+        proc.communicate()
     else:
         proc = subprocess.Popen(cmd, shell=True,
                                 stderr=subprocess.PIPE,

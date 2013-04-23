@@ -765,6 +765,9 @@ def create(vm_=None, call=None):
         deploy_kwargs['display_ssh_output'] = config.get_config_value(
             'display_ssh_output', vm_, __opts__, default=True
         )
+        deploy_kwargs['stream_ssh_output'] = config.get_config_value(
+            'stream_ssh_output', vm_, __opts__, default=False
+        )
 
         deploy_kwargs['minion_conf'] = saltcloud.utils.minion_conf_string(
             __opts__, vm_
