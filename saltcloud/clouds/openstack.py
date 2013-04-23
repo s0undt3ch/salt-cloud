@@ -100,6 +100,7 @@ Using the new syntax:
 import os
 import time
 import logging
+import pprint
 import socket
 import pprint
 
