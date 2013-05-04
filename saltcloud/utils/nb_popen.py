@@ -48,10 +48,10 @@ class NonBlockingPopen(subprocess.Popen):
                 self.obuff += obuff
                 if obuff:
                     logging.getLogger(
-                        '{0}.Popen-{1}.stdout'.format(__name__, self.pid)
+                        'saltcloud.Popen.PID-{0}.stdout'.format(self.pid)
                     ).warn(obuff)
                     if self.stream_stds:
-                        sys.stdout.write(obuff)
+                        sys.stdout.write(obuff.rstrip())
             except IOError, err:
                 if err.errno not in (11, 35):
                     # We only handle Resource not ready properly, any other
@@ -63,8 +63,8 @@ class NonBlockingPopen(subprocess.Popen):
                 self.ebuff += ebuff
                 if ebuff:
                     logging.getLogger(
-                        '{0}.Popen-{1}.stderr'.format(__name__, self.pid)
-                    ).warn(ebuff)
+                        'saltcloud.Popen.PID-{0}.stderr'.format(self.pid)
+                    ).warn(ebuff.rstrip())
                     if self.stream_stds:
                         sys.stderr.write(ebuff)
             except IOError, err:
