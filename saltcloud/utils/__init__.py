@@ -635,6 +635,7 @@ def root_cmd(command, tty, sudo, **kwargs):
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stream_stds=True,
+            fake_tty=tty
         )
         proc.communicate()
     else:
