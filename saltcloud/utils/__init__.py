@@ -624,30 +624,16 @@ def root_cmd(command, tty, sudo, **kwargs):
         cmd = 'sshpass -p {0} {1}'.format(kwargs['password'], cmd)
 
     log.debug('Executing command: {0}'.format(command))
-
-    if kwargs.get('display_ssh_output', True) is True:
-        return subprocess.call(cmd, shell=True)
-    elif kwargs.get('stream_ssh_output', True) is True:
-        from saltcloud.utils.nb_popen import NonBlockingPopen
-        proc = NonBlockingPopen(
-            cmd,
-            shell=True,
-            stderr=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stream_stds=True,
-            fake_tty=tty
-        )
-        proc.communicate()
-    else:
-        proc = subprocess.Popen(cmd, shell=True,
-                                stderr=subprocess.PIPE,
-                                stdout=subprocess.PIPE)
-        out, err = proc.communicate()
-        if out and out.strip():
-            log.info('{0!r} STDOUT:\n{1}'.format(command, out))
-        if err and err.strip():
-            log.info('{0!r} STDERR:\n{1}'.format(command, err))
-        return proc.returncode
+    from saltcloud.utils.nb_popen import NonBlockingPopen
+    proc = NonBlockingPopen(
+        cmd,
+        shell=True,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stream_stds=kwargs.get('display_ssh_output', True),
+    )
+    proc.communicate()
+    return proc.returncode
 
 
 def check_auth(name, pub_key=None, sock_dir=None, queue=None, timeout=300):
