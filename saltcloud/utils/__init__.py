@@ -599,16 +599,10 @@ def root_cmd(command, tty, sudo, **kwargs):
         command = 'sudo ' + command
         log.debug('Using sudo to run command {0!r}'.format(command))
 
-        #command = 'su --session-command={0!r}'.format(command)
-        #log.debug(
-        #    'Using su --session-command to run command {0!r}'.format(
-        #        command
-        #    )
-        #)
-
     ssh_args = []
     if tty:
-        ssh_args.append(' -t')
+        # We need the double -t because sudo sometimes has requiretty set
+        ssh_args.extend(['-t', '-t'])
 
     ssh_args.append('-oStrictHostKeyChecking=no')
     ssh_args.append('-oUserKnownHostsFile=/dev/null')
@@ -618,7 +612,7 @@ def root_cmd(command, tty, sudo, **kwargs):
         # tell SSH to skip password authentication
         ssh_args.append('-oPasswordAuthentication=no')
         # Also, specify the location of the key file
-        ssh_args.append('-i {0}'.format(kwargs['key_filename']))
+        ssh_args.extend(['-i', kwargs['key_filename']])
 
     cmd = 'ssh {0} {1}@{2} {3!r}'.format(
         ' '.join(ssh_args),
@@ -636,13 +630,6 @@ def root_cmd(command, tty, sudo, **kwargs):
         proc = NonBlockingPopen(
             cmd,
             shell=True,
-            #stdin=(
-            #    tty is True and
-            #    # Redirect stdin to devnull
-            #    os.open(os.devnull, os.O_RDWR)
-            #    # Or leave is as None which is the default
-            #    or None
-            #),
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stream_stds=kwargs.get('display_ssh_output', True),
@@ -656,7 +643,6 @@ def root_cmd(command, tty, sudo, **kwargs):
             time.sleep(0.25)
 
         proc.communicate()
-
         return proc.returncode
     except Exception as err:
         log.error(
