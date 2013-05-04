@@ -646,7 +646,7 @@ def root_cmd(command, tty, sudo, **kwargs):
         )
         log.debug(
             'Executing command(PID {0}): {1!r}'.format(
-                proc.pid ,command
+                proc.pid, command
             )
         )
         while proc.poll() is None:
