@@ -339,7 +339,8 @@ def deploy_script(host, port=22, timeout=900, username='root',
                   minion_pub=None, minion_pem=None, minion_conf=None,
                   keep_tmp=False, script_args=None, ssh_timeout=15,
                   display_ssh_output=True, make_syndic=False,
-                  preseed_minion_keys=None, make_minion=True):
+                  preseed_minion_keys=None, make_minion=True,
+                  stream_ssh_output=False):
     '''
     Copy a deploy script to a remote server, execute it, and remove it
     '''
@@ -361,6 +362,7 @@ def deploy_script(host, port=22, timeout=900, username='root',
                       'port': port,
                       'username': username,
                       'timeout': ssh_timeout,
+                      'stream_ssh_output': stream_ssh_output,
                       'display_ssh_output': display_ssh_output}
             if key_filename:
                 log.debug('Using {0} as the key_filename'.format(key_filename))
@@ -461,7 +463,6 @@ def deploy_script(host, port=22, timeout=900, username='root',
 
             # Run the deploy script
             if script:
-                log.debug('Executing /tmp/deploy.sh')
                 if 'bootstrap-salt' in script:
                     deploy_command += ' -c /tmp/'
                     if make_syndic is True:
@@ -477,7 +478,8 @@ def deploy_script(host, port=22, timeout=900, username='root',
                 if script_args:
                     deploy_command += ' {0}'.format(script_args)
 
-                if root_cmd(deploy_command, tty, sudo, **kwargs):
+                log.debug('Executing /tmp/deploy.sh')
+                if root_cmd(deploy_command, tty, sudo, **kwargs) != 0:
                     raise SaltCloudSystemExit(
                         'Executing the command {0!r} failed'.format(
                             deploy_command
@@ -623,13 +625,27 @@ def root_cmd(command, tty, sudo, **kwargs):
 
     log.debug('Executing command: {0}'.format(command))
 
-    if 'display_ssh_output' in kwargs and kwargs['display_ssh_output']:
+    if kwargs.get('display_ssh_output', True) is True:
         return subprocess.call(cmd, shell=True)
+    elif kwargs.get('stream_ssh_output', True) is True:
+        from saltcloud.utils.nb_popen import NonBlockingPopen
+        proc = NonBlockingPopen(
+            cmd,
+            shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stream_stds=True,
+        )
+        proc.communicate()
     else:
         proc = subprocess.Popen(cmd, shell=True,
                                 stderr=subprocess.PIPE,
                                 stdout=subprocess.PIPE)
-        proc.communicate()
+        out, err = proc.communicate()
+        if out and out.strip():
+            log.info('{0!r} STDOUT:\n{1}'.format(command, out))
+        if err and err.strip():
+            log.info('{0!r} STDERR:\n{1}'.format(command, err))
         return proc.returncode
 
 
