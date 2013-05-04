@@ -624,14 +624,25 @@ def root_cmd(command, tty, sudo, **kwargs):
         cmd = 'sshpass -p {0} {1}'.format(kwargs['password'], cmd)
 
     try:
-        log.debug('Executing command: {0!r}'.format(command))
         from saltcloud.utils.nb_popen import NonBlockingPopen
         proc = NonBlockingPopen(
             cmd,
             shell=True,
+            stdin=(
+                tty is True and
+                # Redirect stdin to devnull
+                os.open(os.devnull, os.O_RDWR)
+                # Or leave is as None which is the default
+                or None
+            ),
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stream_stds=kwargs.get('display_ssh_output', True),
+        )
+        log.debug(
+            'Executing command(PID {0}): {1!r}'.format(
+                proc.pid ,command
+            )
         )
         while proc.poll() is None:
             time.sleep(0.25)
