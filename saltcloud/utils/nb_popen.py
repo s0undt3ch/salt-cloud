@@ -21,10 +21,26 @@ import subprocess
 class NonBlockingPopen(subprocess.Popen):
 
     def __init__(self, *args, **kwargs):
+        self.fake_tty = kwargs.pop('fake_tty', False)
         self.stream_stds = kwargs.pop('stream_stds', False)
         self.olog = logging.getLogger('{0}.stdout'.format(__name__))
         self.elog = logging.getLogger('{0}.stderr'.format(__name__))
+        if self.fake_tty is True:
+            if kwargs.get('stdin', None) is not None:
+                raise RuntimeError(
+                    'Can\'t use a fake tty if you\'re also passing a stdin'
+                )
+
+            # Let's create a fake, pseudo, tty
+            import pty
+            self.fake_tty_master, self.fake_tty_slave = pty.openpty()
+            kwargs['stdin'] = self.fake_tty_slave
+
         super(NonBlockingPopen, self).__init__(*args, **kwargs)
+
+        if self.fake_tty:
+            os.fdopen(self.fake_tty_master, 'w', 0)
+
         if self.stdout is not None and self.stream_stds:
             fod = self.stdout.fileno()
             fol = fcntl.fcntl(fod, fcntl.F_GETFL)
@@ -86,3 +102,19 @@ class NonBlockingPopen(subprocess.Popen):
                     # raise the exception
                     raise
         return poll
+
+    def __del__(self):
+        if self.fake_tty:
+            self.fake_tty_master.close()
+
+        if self.stdout is not None and self.stream_stds:
+            fod = self.stdout.fileno()
+            fol = fcntl.fcntl(fod, fcntl.F_GETFL)
+            fcntl.fcntl(fod, fcntl.F_SETFL, fol & ~os.O_NONBLOCK)
+
+        if self.stderr is not None and self.stream_stds:
+            fed = self.stderr.fileno()
+            fel = fcntl.fcntl(fed, fcntl.F_GETFL)
+            fcntl.fcntl(fed, fcntl.F_SETFL, fel & ~os.O_NONBLOCK)
+
+        super(NonBlockingPopen, self).__del__()
