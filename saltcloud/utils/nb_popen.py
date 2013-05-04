@@ -48,7 +48,7 @@ class NonBlockingPopen(subprocess.Popen):
                 self.obuff += obuff
                 if obuff:
                     logging.getLogger(
-                        'saltcloud.Popen.PID-{0}.stdout'.format(self.pid)
+                        'saltcloud.Popen.PID-{0}.STDOUT'.format(self.pid)
                     ).warn(obuff)
                     if self.stream_stds:
                         sys.stdout.write(obuff.rstrip())
@@ -63,7 +63,7 @@ class NonBlockingPopen(subprocess.Popen):
                 self.ebuff += ebuff
                 if ebuff:
                     logging.getLogger(
-                        'saltcloud.Popen.PID-{0}.stderr'.format(self.pid)
+                        'saltcloud.Popen.PID-{0}.STDERR'.format(self.pid)
                     ).warn(ebuff.rstrip())
                     if self.stream_stds:
                         sys.stderr.write(ebuff)
