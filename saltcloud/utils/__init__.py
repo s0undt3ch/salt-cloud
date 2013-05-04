@@ -632,7 +632,8 @@ def root_cmd(command, tty, sudo, **kwargs):
         stdout=subprocess.PIPE,
         stream_stds=kwargs.get('display_ssh_output', True),
     )
-    proc.communicate()
+    while proc.returncode is None:
+        pass
     return proc.returncode
 
 
