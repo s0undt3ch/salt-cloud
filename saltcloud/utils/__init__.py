@@ -636,13 +636,13 @@ def root_cmd(command, tty, sudo, **kwargs):
         proc = NonBlockingPopen(
             cmd,
             shell=True,
-            stdin=(
-                tty is True and
-                # Redirect stdin to devnull
-                os.open(os.devnull, os.O_RDWR)
-                # Or leave is as None which is the default
-                or None
-            ),
+            #stdin=(
+            #    tty is True and
+            #    # Redirect stdin to devnull
+            #    os.open(os.devnull, os.O_RDWR)
+            #    # Or leave is as None which is the default
+            #    or None
+            #),
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stream_stds=kwargs.get('display_ssh_output', True),
