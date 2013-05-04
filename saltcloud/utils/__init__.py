@@ -623,18 +623,26 @@ def root_cmd(command, tty, sudo, **kwargs):
     if 'password' in kwargs:
         cmd = 'sshpass -p {0} {1}'.format(kwargs['password'], cmd)
 
-    log.debug('Executing command: {0}'.format(command))
-    from saltcloud.utils.nb_popen import NonBlockingPopen
-    proc = NonBlockingPopen(
-        cmd,
-        shell=True,
-        stderr=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stream_stds=kwargs.get('display_ssh_output', True),
-    )
-    while proc.returncode is None:
-        pass
-    return proc.returncode
+    try:
+        log.debug('Executing command: {0!r}'.format(command))
+        from saltcloud.utils.nb_popen import NonBlockingPopen
+        proc = NonBlockingPopen(
+            cmd,
+            shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stream_stds=kwargs.get('display_ssh_output', True),
+        )
+        while proc.returncode is None:
+            pass
+        return proc.returncode
+    except Exception as err:
+        log.error(
+            'Failed to execute command {0!r}: {1}\n'.format(
+                command, err
+            ),
+            exc_info=True
+        )
 
 
 def check_auth(name, pub_key=None, sock_dir=None, queue=None, timeout=300):

@@ -19,6 +19,7 @@ import subprocess
 
 log = logging.getLogger(__name__)
 
+
 class NonBlockingPopen(subprocess.Popen):
 
     def __init__(self, *args, **kwargs):
@@ -29,15 +30,14 @@ class NonBlockingPopen(subprocess.Popen):
             fod = self.stdout.fileno()
             fol = fcntl.fcntl(fod, fcntl.F_GETFL)
             fcntl.fcntl(fod, fcntl.F_SETFL, fol | os.O_NONBLOCK)
-            self.obuff = ''
+        self.obuff = ''
 
         if self.stderr is not None:
             fed = self.stderr.fileno()
             fel = fcntl.fcntl(fed, fcntl.F_GETFL)
             fcntl.fcntl(fed, fcntl.F_SETFL, fel | os.O_NONBLOCK)
-            self.ebuff = ''
-
-        log.info('Running command {0!r}'.format(*args)
+        self.ebuff = ''
+        log.info('Running command {0!r}'.format(*args))
 
     def poll(self):
         poll = super(NonBlockingPopen, self).poll()
