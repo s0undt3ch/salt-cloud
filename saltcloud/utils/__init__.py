@@ -596,8 +596,13 @@ def root_cmd(command, tty, sudo, **kwargs):
     Wrapper for commands to be run as root
     '''
     if sudo:
-        command = 'sudo ' + command
-        log.debug('Using sudo to run command {0}'.format(command))
+        #command = 'sudo ' + command
+        command = 'su --session-command={0!r}'.format(command)
+        log.debug(
+            'Using su --session-command to run command {0!r}'.format(
+                command
+            )
+        )
 
     ssh_args = ' -oStrictHostKeyChecking=no'
     ssh_args += ' -oUserKnownHostsFile=/dev/null'
