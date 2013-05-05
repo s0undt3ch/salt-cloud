@@ -606,6 +606,7 @@ def root_cmd(command, tty, sudo, **kwargs):
 
     ssh_args.append('-oStrictHostKeyChecking=no')
     ssh_args.append('-oUserKnownHostsFile=/dev/null')
+    ssh_args.append('-oControlPath=none')
 
     if 'key_filename' in kwargs:
         # There should never be both a password and an ssh key passed in, so
