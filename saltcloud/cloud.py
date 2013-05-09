@@ -16,6 +16,7 @@ import saltcloud.loader
 import saltcloud.config as config
 from saltcloud.exceptions import (
     SaltCloudNotFound,
+    SaltCloudException,
     SaltCloudSystemExit,
     SaltCloudConfigError
 )
@@ -468,7 +469,8 @@ class Cloud(object):
                 )
             )
 
-        if 'pub_key' not in vm_ and 'priv_key' not in vm_:
+        if deploy is True and 'pub_key' not in vm_ and 'priv_key' not in vm_:
+            log.debug('Generating minion keys for {0[name]!r}'.format(vm_))
             priv, pub = saltcloud.utils.gen_keys(
                 config.get_config_value('keysize', vm_, self.opts)
             )
@@ -482,12 +484,17 @@ class Cloud(object):
 
         if make_master is True:
             if 'master_pub' not in vm_ and 'master_pem' not in vm_:
+                log.debug(
+                    'Generating the master keys for {0[name]!r}'.format(
+                        vm_
+                    )
+                )
                 master_priv, master_pub = saltcloud.utils.gen_keys(
                     config.get_config_value('keysize', vm_, self.opts)
                 )
                 vm_['master_pub'] = master_pub
                 vm_['master_pem'] = master_priv
-        elif local_master is True:
+        elif local_master is True and deploy is True:
             # Since we're not creating a master, and we're deploying, accept
             # the key on the local master
             saltcloud.utils.accept_key(
@@ -662,6 +669,11 @@ class Cloud(object):
         Perform a function against a cloud provider
         '''
         fun = '{0}.{1}'.format(prov, func)
+        log.debug(
+            'Trying to execute {0!r} with the following kwargs: {1}'.format(
+                fun, kwargs
+            )
+        )
         if kwargs:
             ret = self.clouds[fun](call='function', kwargs=kwargs)
         else:
@@ -736,7 +748,8 @@ class Map(Cloud):
             log.error(
                 'Rendering map {0} failed, render error:\n{1}'.format(
                     self.opts['map'], exc
-                )
+                ),
+                exc_info=log.isEnabledFor(logging.DEBUG)
             )
             return {}
 
@@ -875,7 +888,7 @@ class Map(Cloud):
                 (name, profile) for name, profile in dmap['create'].items()
                 if profile.get('make_master', False) is True
             ).next()
-            log.debug('Creating new master {0}'.format(master_name))
+            log.debug('Creating new master {0!r}'.format(master_name))
             if config.get_config_value('deploy',
                                        master_profile,
                                        self.opts) is False:
@@ -885,6 +898,9 @@ class Map(Cloud):
                 )
 
             # Generate the master keys
+            log.debug(
+                'Generating master keys for {0[name]!r}'.format(master_profile)
+            )
             priv, pub = saltcloud.utils.gen_keys(
                 config.get_config_value('keysize', master_profile, self.opts)
             )
@@ -914,6 +930,9 @@ class Map(Cloud):
                 if make_minion is False:
                     continue
 
+                log.debug(
+                    'Generating minion keys for {0[name]!r}'.format(profile)
+                )
                 priv, pub = saltcloud.utils.gen_keys(
                     config.get_config_value('keysize', profile, self.opts)
                 )
@@ -925,6 +944,14 @@ class Map(Cloud):
                 master_profile['preseed_minion_keys'].update({name: pub})
 
             out = self.create(master_profile, local_master=False)
+
+            if not isinstance(out, dict):
+                log.debug(
+                    'Master creation details is not a dictionary: {0}'.format(
+                        out
+                    )
+                )
+
             deploy_kwargs = (
                 self.opts.get('show_deploy_args', False) is True and
                 # Get the needed data
@@ -972,11 +999,22 @@ class Map(Cloud):
                     'local_master': master_name is None
                 })
             else:
-                output[name] = self.create(
-                    profile, local_master=master_name is None
-                )
-                if self.opts.get('show_deploy_args', False) is False:
-                    output[name].pop('deploy_kwargs', None)
+                try:
+                    output[name] = self.create(
+                        profile, local_master=master_name is None
+                    )
+                    if self.opts.get('show_deploy_args', False) is False:
+                        output[name].pop('deploy_kwargs', None)
+                except SaltCloudException as exc:
+                    log.error(
+                        'Failed to deploy {0!r}. Error: {1}'.format(
+                            name, exc
+                        ),
+                        # Show the traceback if the debug logging level is
+                        # enabled
+                        exc_info=log.isEnabledFor(logging.DEBUG)
+                    )
+                    output[name] = {'Error': str(exc)}
 
         for name in dmap.get('destroy', ()):
             output[name] = self.destroy(name)
@@ -999,10 +1037,22 @@ def create_multiprocessing(parallel_data):
     '''
     parallel_data['opts']['output'] = 'json'
     cloud = Cloud(parallel_data['opts'])
-    output = cloud.create(
-        parallel_data['profile'],
-        local_master=parallel_data['opts']['local_master']
-    )
+    try:
+        output = cloud.create(
+            parallel_data['profile'],
+            local_master=parallel_data['local_master']
+        )
+    except SaltCloudException as exc:
+        log.error(
+            'Failed to deploy {0[name]!r}. Error: {1}'.format(
+                parallel_data, exc
+            ),
+            # Show the traceback if the debug logging level is
+            # enabled
+            exc_info=log.isEnabledFor(logging.DEBUG)
+        )
+        return {parallel_data['name']: {'Error': str(exc)}}
+
     if parallel_data['opts'].get('show_deploy_args', False) is False:
         output.pop('deploy_kwargs', None)
     return {parallel_data['name']: output}

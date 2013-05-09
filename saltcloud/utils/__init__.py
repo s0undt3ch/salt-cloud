@@ -28,6 +28,7 @@ import salt.utils.event
 
 # Import salt cloud libs
 import saltcloud.config as config
+from saltcloud.utils.nb_popen import NonBlockingPopen
 from saltcloud.exceptions import (
     SaltCloudConfigError,
     SaltCloudException,
@@ -175,11 +176,11 @@ def get_option(option, opts, vm_):
         return opts[option]
 
 
-def minion_conf_string(opts, vm_):
+def minion_conf(opts, vm_):
     '''
-    Return a string to be passed into the deployment script for the minion
-    configuration file
+    Return a minion's configuration for the provided options and VM
     '''
+
     # Let's get a copy of the salt minion default options
     minion = salt.config.DEFAULT_MINION_OPTS.copy()
     # Some default options are Null, let's set a reasonable default
@@ -218,15 +219,21 @@ def minion_conf_string(opts, vm_):
             'grains', vm_, opts, default={}, search_global=True
         )
     )
-    return yaml.safe_dump(minion, default_flow_style=False)
+    return minion
 
 
-def master_conf_string(opts, vm_):
+def minion_conf_string(opts, vm_):
     '''
-    Return a string to be passed into the deployment script for the master
+    Return a string to be passed into the deployment script for the minion
     configuration file
     '''
+    return salt_config_to_yaml(minion_conf(opts, vm_))
 
+
+def master_conf(opts, vm_):
+    '''
+    Return a master's configuration for the provided options and VM
+    '''
     # Let's get a copy of the salt master default options
     master = salt.config.DEFAULT_MASTER_OPTS.copy()
     # Some default options are Null, let's set a reasonable default
@@ -244,7 +251,22 @@ def master_conf_string(opts, vm_):
             'master', vm_, opts, default={}, search_global=True
         )
     )
-    return yaml.safe_dump(master, default_flow_style=False)
+    return master
+
+
+def master_conf_string(opts, vm_):
+    '''
+    Return a string to be passed into the deployment script for the master
+    configuration file
+    '''
+    return salt_config_to_yaml(master_conf(opts, vm_))
+
+
+def salt_config_to_yaml(config):
+    '''
+    Return a salt configuration dictionary, master or minion, as a yaml dump
+    '''
+    return yaml.safe_dump(config, default_flow_style=False)
 
 
 def wait_for_ssh(host, port=22, timeout=900):
@@ -263,9 +285,12 @@ def wait_for_ssh(host, port=22, timeout=900):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((host, port))
-            sock.shutdown(2)
+            # Stop any remaining reads/writes on the socket
+            sock.shutdown(socket.SHUT_RDWR)
+            # Close it!
+            sock.close()
             return True
-        except Exception as exc:
+        except socket.error as exc:
             log.debug('Caught exception in wait_for_ssh: {0}'.format(exc))
             time.sleep(1)
             if time.time() - start > timeout:
@@ -295,6 +320,12 @@ def wait_for_passwd(host, port=22, ssh_timeout=15, username='root',
                       'username': username,
                       'timeout': ssh_timeout}
             if key_filename:
+                if not os.path.isfile(key_filename):
+                    raise SaltCloudConfigError(
+                        'The defined key_filename {0!r} does not exist'.format(
+                            key_filename
+                        )
+                    )
                 kwargs['key_filename'] = key_filename
                 log.debug('Using {0} as the key_filename'.format(key_filename))
             elif password:
@@ -344,6 +375,12 @@ def deploy_script(host, port=22, timeout=900, username='root',
     '''
     Copy a deploy script to a remote server, execute it, and remove it
     '''
+    if key_filename is not None and not os.path.isfile(key_filename):
+        raise SaltCloudConfigError(
+            'The defined key_filename {0!r} does not exist'.format(
+                key_filename
+            )
+        )
     starttime = time.mktime(time.localtime())
     log.debug('Deploying {0} at {1}'.format(host, starttime))
     if wait_for_ssh(host=host, port=port, timeout=timeout):
@@ -572,23 +609,64 @@ def scp_file(dest_path, contents, kwargs):
     tmpfh, tmppath = tempfile.mkstemp()
     with salt.utils.fopen(tmppath, 'w') as tmpfile:
         tmpfile.write(contents)
+
     log.debug('Uploading {0} to {1}'.format(dest_path, kwargs['hostname']))
-    cmd = 'scp -oStrictHostKeyChecking=no {0} {1}@{2}:{3}'.format(
-        tmppath,
-        kwargs['username'],
-        kwargs['hostname'],
-        dest_path
-    )
+
+    ssh_args = [
+        # Don't add new hosts to the host key database
+        '-oStrictHostKeyChecking=no',
+        # Set hosts key database path to /dev/null, ie, non-existing
+        '-oUserKnownHostsFile=/dev/null',
+        # Don't re-use the SSH connection. Less failures.
+        '-oControlPath=none'
+    ]
     if 'key_filename' in kwargs:
-        cmd = cmd.replace('=no', '=no -i {0}'.format(kwargs['key_filename']))
-    elif 'password' in kwargs:
+        # There should never be both a password and an ssh key passed in, so
+        ssh_args.extend([
+            # tell SSH to skip password authentication
+            '-oPasswordAuthentication=no',
+            '-oChallengeResponseAuthentication=no',
+            # Make sure public key authentication is enabled
+            '-oPubkeyAuthentication=yes',
+            # No Keyboard interaction!
+            '-oKbdInteractiveAuthentication=no',
+            # Also, specify the location of the key file
+            '-i {0}'.format(kwargs['key_filename'])
+        ])
+
+    cmd = 'scp {0} {1} {2[username]}@{2[hostname]}:{3}'.format(
+        ' '.join(ssh_args), tmppath, kwargs, dest_path
+    )
+    log.debug('SCP command: {0!r}'.format(cmd))
+
+    if 'password' in kwargs:
         cmd = 'sshpass -p {0} {1}'.format(kwargs['password'], cmd)
 
-    log.debug('Running command {0!r}'.format(cmd))
-    proc = subprocess.Popen(
-        cmd, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE
-    )
-    return proc.returncode
+    try:
+        proc = NonBlockingPopen(
+            cmd,
+            shell=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stream_stds=kwargs.get('display_ssh_output', True),
+        )
+        log.debug(
+            'Executing command(PID {0}): {1!r}'.format(
+                proc.pid, command
+            )
+        )
+        while proc.poll() is None:
+            time.sleep(0.25)
+
+        proc.communicate()
+        return proc.returncode
+    except Exception as err:
+        log.error(
+            'Failed to execute command {0!r}: {1}\n'.format(
+                command, err
+            ),
+            exc_info=True
+        )
 
 
 def root_cmd(command, tty, sudo, **kwargs):
@@ -596,30 +674,40 @@ def root_cmd(command, tty, sudo, **kwargs):
     Wrapper for commands to be run as root
     '''
     if sudo:
-        command = 'sudo ' + command
+        command = 'sudo {0}'.format(command)
         log.debug('Using sudo to run command {0!r}'.format(command))
 
     ssh_args = []
     if tty:
-        # We need the double -t because sudo sometimes has requiretty set
+        # Use double `-t` on the `ssh` command, it's necessary when `sudo` has
+        # `requiretty` enforced.
         ssh_args.extend(['-t', '-t'])
 
-    ssh_args.append('-oStrictHostKeyChecking=no')
-    ssh_args.append('-oUserKnownHostsFile=/dev/null')
-    ssh_args.append('-oControlPath=none')
+    ssh_args.extend([
+        # Don't add new hosts to the host key database
+        '-oStrictHostKeyChecking=no',
+        # Set hosts key database path to /dev/null, ie, non-existing
+        '-oUserKnownHostsFile=/dev/null',
+        # Don't re-use the SSH connection. Less failures.
+        '-oControlPath=none'
+    ])
 
     if 'key_filename' in kwargs:
         # There should never be both a password and an ssh key passed in, so
-        # tell SSH to skip password authentication
-        ssh_args.append('-oPasswordAuthentication=no')
-        # Also, specify the location of the key file
-        ssh_args.extend(['-i', kwargs['key_filename']])
+        ssh_args.extend([
+            # tell SSH to skip password authentication
+            '-oPasswordAuthentication=no',
+            '-oChallengeResponseAuthentication=no',
+            # Make sure public key authentication is enabled
+            '-oPubkeyAuthentication=yes',
+            # No Keyboard interaction!
+            '-oKbdInteractiveAuthentication=no',
+            # Also, specify the location of the key file
+            '-i {0}'.format(kwargs['key_filename'])
+        ])
 
-    cmd = 'ssh {0} {1}@{2} {3!r}'.format(
-        ' '.join(ssh_args),
-        kwargs['username'],
-        kwargs['hostname'],
-        command
+    cmd = 'ssh {0} {1[username]}@{1[hostname]} {2!r}'.format(
+        ' '.join(ssh_args), kwargs, command
     )
     log.debug('SSH command: {0!r}'.format(cmd))
 
@@ -627,7 +715,6 @@ def root_cmd(command, tty, sudo, **kwargs):
         cmd = 'sshpass -p {0} {1}'.format(kwargs['password'], cmd)
 
     try:
-        from saltcloud.utils.nb_popen import NonBlockingPopen
         proc = NonBlockingPopen(
             cmd,
             shell=True,

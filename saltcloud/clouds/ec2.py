@@ -619,6 +619,16 @@ def create(vm_=None, call=None):
             'You cannot create an instance with -a or -f.'
         )
 
+    key_filename = config.get_config_value(
+        'private_key', vm_, __opts__, search_global=False, default=None
+    )
+    if key_filename is not None and not os.path.isfile(key_filename):
+        raise SaltCloudConfigError(
+            'The defined key_filename {0!r} does not exist'.format(
+                key_filename
+            )
+        )
+
     location = get_location(vm_)
     log.info('Creating Cloud VM {0} in {1}'.format(vm_['name'], location))
     usernames = ssh_username(vm_)
@@ -725,11 +735,47 @@ def create(vm_=None, call=None):
             'An error occurred while creating VM: {0}'.format(data['error'])
         )
 
-    while 'ipAddress' not in data[0]['instancesSet']['item']:
+    failures = 6
+    while True:
         log.debug('Salt node waiting for IP {0}'.format(waiting_for_ip))
         time.sleep(5)
-        waiting_for_ip += 1
         data = query(params, requesturl=requesturl)
+        if not data or isinstance(data, dict):
+            if failures < 1:
+                raise SaltCloudSystemExit(
+                    'There were too many errors while querying EC2'
+                )
+            if not data:
+                log.error(
+                    'There was an error while querying EC2. Empty response'
+                )
+            else:
+                log.error(
+                    'There was an error while querying EC2. '
+                    'Returned Error: {0}'.format(data['error'])
+                )
+            failures -= 1
+            continue
+
+        if failures < 6:
+            # Reset failed attempts
+            failures = 6
+            log.debug('Reseting failed query attempts')
+
+        log.debug(
+            'Returned query data: {0}'.format(data)
+        )
+
+        if 'ipAddress' in data[0]['instancesSet']['item']:
+            # We have our IP, break out of the loop
+            break
+
+        if waiting_for_ip >= 24:
+            # 2 Minutes!? Bail out!
+            raise SaltCloudSystemExit(
+                'Could not get the VM IP for 2 minutes. Exiting.'
+            )
+        waiting_for_ip += 1
 
     if ssh_interface(vm_) == 'private_ips':
         ip_address = data[0]['instancesSet']['item']['privateIpAddress']
@@ -740,10 +786,10 @@ def create(vm_=None, call=None):
 
     if saltcloud.utils.wait_for_ssh(ip_address):
         for user in usernames:
-            if saltcloud.utils.wait_for_passwd(
-                    host=ip_address, username=user, ssh_timeout=60,
-                    key_filename=config.get_config_value(
-                        'private_key', vm_, __opts__)):
+            if saltcloud.utils.wait_for_passwd(host=ip_address,
+                                               username=user,
+                                               ssh_timeout=60,
+                                               key_filename=key_filename):
                 username = user
                 break
         else:
@@ -755,9 +801,7 @@ def create(vm_=None, call=None):
         deploy_kwargs = {
             'host': ip_address,
             'username': username,
-            'key_filename': config.get_config_value(
-                'private_key', vm_, __opts__, search_global=False
-            ),
+            'key_filename': key_filename,
             'deploy_command': 'sh /tmp/deploy.sh',
             'tty': True,
             'script': deploy_script,
@@ -791,9 +835,10 @@ def create(vm_=None, call=None):
             deploy_kwargs['make_master'] = True
             deploy_kwargs['master_pub'] = vm_['master_pub']
             deploy_kwargs['master_pem'] = vm_['master_pem']
-            master_conf = saltcloud.utils.master_conf_string(__opts__, vm_)
-            if master_conf:
-                deploy_kwargs['master_conf'] = master_conf
+            master_conf = saltcloud.utils.master_conf(__opts__, vm_)
+            deploy_kwargs['master_conf'] = saltcloud.utils.salt_config_to_yaml(
+                master_conf
+            )
 
             if master_conf.get('syndic_master', None):
                 deploy_kwargs['make_syndic'] = True

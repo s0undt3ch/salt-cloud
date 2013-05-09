@@ -285,6 +285,16 @@ def create(vm_):
     '''
     Create a single VM from a data dict
     '''
+    key_filename = config.get_config_value(
+        'private_key', vm_, __opts__, search_global=False, default=None
+    )
+    if key_filename is not None and not os.path.isfile(key_filename):
+        raise SaltCloudConfigError(
+            'The defined key_filename {0!r} does not exist'.format(
+                key_filename
+            )
+        )
+
     location = get_location(vm_)
     log.info('Creating Cloud VM {0} in {1}'.format(vm_['name'], location))
     conn = get_conn(location=location)
@@ -354,10 +364,10 @@ def create(vm_):
     username = 'ec2-user'
     if saltcloud.utils.wait_for_ssh(ip_address):
         for user in usernames:
-            if saltcloud.utils.wait_for_passwd(
-                    host=ip_address, username=user, ssh_timeout=60,
-                    key_filename=config.get_config_value(
-                        'private_key', vm_, __opts__, search_global=False)):
+            if saltcloud.utils.wait_for_passwd(host=ip_address,
+                                               username=user,
+                                               ssh_timeout=60,
+                                               key_filename=key_filename):
                 username = user
                 break
         else:
@@ -369,9 +379,7 @@ def create(vm_):
         deploy_kwargs = {
             'host': ip_address,
             'username': username,
-            'key_filename': config.get_config_value(
-                'private_key', vm_, __opts__, search_global=False
-            ),
+            'key_filename': key_filename,
             'deploy_command': 'sh /tmp/deploy.sh',
             'tty': True,
             'script': deploy_script.script,
@@ -400,9 +408,10 @@ def create(vm_):
             deploy_kwargs['make_master'] = True
             deploy_kwargs['master_pub'] = vm_['master_pub']
             deploy_kwargs['master_pem'] = vm_['master_pem']
-            master_conf = saltcloud.utils.master_conf_string(__opts__, vm_)
-            if master_conf:
-                deploy_kwargs['master_conf'] = master_conf
+            master_conf = saltcloud.utils.master_conf(__opts__, vm_)
+            deploy_kwargs['master_conf'] = saltcloud.utils.salt_config_to_yaml(
+                master_conf
+            )
 
             if master_conf.get('syndic_master', None):
                 deploy_kwargs['make_syndic'] = True

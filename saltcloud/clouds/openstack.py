@@ -14,7 +14,7 @@ on Debian-based systems by means of the python-netaddr package.
 
 This module has been tested to work with HP Cloud and Rackspace. See the
 documentation for specific options for either of these providers. Some
-examples, using the old could configuration syntax, are provided below:
+examples, using the old cloud configuration syntax, are provided below:
 
 .. code-block:: yaml
 
@@ -97,6 +97,7 @@ Using the new syntax:
 # The import section is mostly libcloud boilerplate
 
 # Import python libs
+import os
 import time
 import logging
 import pprint
@@ -115,7 +116,11 @@ import salt.utils
 # Import saltcloud libs
 import saltcloud.config as config
 from saltcloud.utils import namespaced_function
-from saltcloud.exceptions import SaltCloudNotFound, SaltCloudSystemExit
+from saltcloud.exceptions import (
+    SaltCloudConfigError,
+    SaltCloudNotFound,
+    SaltCloudSystemExit
+)
 
 # Import netaddr IP matching
 try:
@@ -263,10 +268,17 @@ def create(vm_):
     Create a single VM from a data dict
     '''
     deploy = config.get_config_value('deploy', vm_, __opts__)
-    ssh_key_file = config.get_config_value(
+    key_filename = config.get_config_value(
         'ssh_key_file', vm_, __opts__, search_global=False, default=None
     )
-    if deploy is True and ssh_key_file is None and \
+    if key_filename is not None and not os.path.isfile(key_filename):
+        raise SaltCloudConfigError(
+            'The defined ssh_key_file {0!r} does not exist'.format(
+                key_filename
+            )
+        )
+
+    if deploy is True and key_filename is None and \
             salt.utils.which('sshpass') is None:
         raise SaltCloudSystemExit(
             'Cannot deploy salt in a VM if the \'ssh_key_file\' setting '
@@ -324,9 +336,7 @@ def create(vm_):
                 group_list.append(vmg)
             else:
                 raise SaltCloudNotFound(
-                    'No such security group: \'{0}\''.format(
-                        group
-                    )
+                    'No such security group: \'{0}\''.format(vg)
                 )
 
         kwargs['ex_security_groups'] = [
@@ -411,9 +421,15 @@ def create(vm_):
                 not_ready = False
                 break
 
+        if running and private:
+            data.private_ips = private
+            if ssh_interface(vm_) == 'private_ips':
+                not_ready = False
+
         if running and public:
             data.public_ips = public
-            not_ready = False
+            if ssh_interface(vm_) != 'private_ips':
+                not_ready = False
 
         if not_ready is False:
             break
@@ -463,10 +479,10 @@ def create(vm_):
 
     log.debug('Using {0} as SSH username'.format(ssh_username))
 
-    if ssh_key_file is not None:
-        deploy_kwargs['key_filename'] = ssh_key_file
+    if key_filename is not None:
+        deploy_kwargs['key_filename'] = key_filename
         log.debug(
-            'Using {0} as SSH key file'.format(ssh_key_file)
+            'Using {0} as SSH key file'.format(key_filename)
         )
     elif 'password' in data.extra:
         deploy_kwargs['password'] = data.extra['password']
@@ -489,9 +505,10 @@ def create(vm_):
             deploy_kwargs['make_master'] = True
             deploy_kwargs['master_pub'] = vm_['master_pub']
             deploy_kwargs['master_pem'] = vm_['master_pem']
-            master_conf = saltcloud.utils.master_conf_string(__opts__, vm_)
-            if master_conf:
-                deploy_kwargs['master_conf'] = master_conf
+            master_conf = saltcloud.utils.master_conf(__opts__, vm_)
+            deploy_kwargs['master_conf'] = saltcloud.utils.salt_config_to_yaml(
+                master_conf
+            )
 
             if master_conf.get('syndic_master', None):
                 deploy_kwargs['make_syndic'] = True
