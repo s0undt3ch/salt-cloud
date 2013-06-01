@@ -829,7 +829,13 @@ def create(vm_=None, call=None):
                 username=user,
                 ssh_timeout=60,
                 key_filename=key_filename,
-                display_ssh_output=display_ssh_output
+                display_ssh_output=display_ssh_output,
+                trysleep=config.get_config_value(
+                    'ssh_wait_for_passwd_trysleep', vm_, __opts__, default=1
+                ),
+                maxtries=config.get_config_value(
+                    'ssh_wait_for_passwd_maxtries', vm_, __opts__, default=15
+                )
             ):
                 username = user
                 break

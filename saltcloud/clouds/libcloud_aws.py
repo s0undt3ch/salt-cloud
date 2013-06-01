@@ -383,10 +383,14 @@ def create(vm_):
     username = 'ec2-user'
     if saltcloud.utils.wait_for_ssh(ip_address):
         for user in usernames:
-            if saltcloud.utils.wait_for_passwd(host=ip_address,
-                                               username=user,
-                                               ssh_timeout=60,
-                                               key_filename=key_filename):
+            if saltcloud.utils.wait_for_passwd(
+                host=ip_address, username=user, ssh_timeout=60,
+                key_filename=key_filename,
+                trysleep=config.get_config_value(
+                    'ssh_wait_for_passwd_trysleep', vm_, __opts__, default=1),
+                maxtries=config.get_config_value(
+                    'ssh_wait_for_passwd_maxtries', vm_, __opts__, default=15)
+            ):
                 username = user
                 break
         else:
